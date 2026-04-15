@@ -1,20 +1,23 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import Image from 'next/image';
 import { NewsItem } from '@/types/news';
 
 interface Props {
   news: NewsItem;
-  onClose: () => void;
+  newsIndex: number;
+  totalNews: number;
+  onNext: () => void;
+  isLastNews: boolean;
 }
 
-export default function CardNewsViewer({ news, onClose }: Props) {
+export default function CardNewsViewer({ news, newsIndex, totalNews, onNext, isLastNews }: Props) {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [imgError, setImgError] = useState<Record<number, boolean>>({});
 
   const totalSlides = news.slides.length;
+  const isLastSlide = currentSlide === totalSlides - 1;
 
   const stopSpeaking = useCallback(() => {
     if (typeof window !== 'undefined') {
@@ -29,7 +32,7 @@ export default function CardNewsViewer({ news, onClose }: Props) {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'ko-KR';
     utterance.rate = 0.85;
-    utterance.pitch = 1.1;
+    utterance.pitch = 1.2;
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
@@ -39,115 +42,125 @@ export default function CardNewsViewer({ news, onClose }: Props) {
   useEffect(() => {
     stopSpeaking();
     setCurrentSlide(0);
+    setImgError({});
   }, [news, stopSpeaking]);
 
-  useEffect(() => {
-    return () => stopSpeaking();
-  }, [stopSpeaking]);
+  useEffect(() => () => stopSpeaking(), [stopSpeaking]);
 
-  const goPrev = () => {
-    stopSpeaking();
-    setCurrentSlide((prev) => Math.max(prev - 1, 0));
-  };
+  const goPrev = () => { stopSpeaking(); setCurrentSlide((p) => Math.max(p - 1, 0)); };
+  const goNext = () => { stopSpeaking(); setCurrentSlide((p) => Math.min(p + 1, totalSlides - 1)); };
+  const handleNextNews = () => { stopSpeaking(); onNext(); };
 
-  const goNext = () => {
-    stopSpeaking();
-    setCurrentSlide((prev) => Math.min(prev + 1, totalSlides - 1));
-  };
+  const safeIndex = Math.min(currentSlide, news.slides.length - 1);
+  const slide = news.slides[safeIndex];
+  if (!slide) return null;
 
-  const slide = news.slides[currentSlide];
-  const fallbackBg = ['bg-sky-200', 'bg-green-200', 'bg-yellow-200', 'bg-pink-200', 'bg-purple-200'];
+  const themes = [
+    { bg: '#FFF3D6', accent: '#F5A623' },
+    { bg: '#D6F0FF', accent: '#3AABDE' },
+    { bg: '#FFD6E8', accent: '#E8609A' },
+    { bg: '#D6FFE8', accent: '#2ECC71' },
+    { bg: '#EFD6FF', accent: '#9B59B6' },
+  ];
+  const theme = themes[safeIndex % themes.length];
+
+  // newsIndex, totalNews 사용 (lint 경고 방지)
+  void newsIndex; void totalNews;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="relative w-full max-w-lg bg-white rounded-3xl overflow-hidden shadow-2xl flex flex-col">
+    /* h-full + flex col: 부모 높이를 꽉 채우고, 버튼은 항상 하단 고정 */
+    <div className="flex flex-col h-full rounded-3xl overflow-hidden" style={{ background: '#FFFDF8' }}>
 
-        {/* 헤더 */}
-        <div className="bg-yellow-400 px-5 py-3 flex items-center justify-between">
-          <h2 className="text-lg font-extrabold text-gray-800 leading-tight line-clamp-1">
+      {/* ── 이미지 (flex-1: 남은 공간 모두 차지, 버튼은 밀려나지 않음) ── */}
+      <div className="relative flex-1 min-h-0 overflow-hidden" style={{ background: theme.bg }}>
+        {!imgError[safeIndex] && slide.imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={slide.imageUrl}
+            alt={slide.text}
+            className="w-full h-full object-cover"
+            onError={() => setImgError((p) => ({ ...p, [safeIndex]: true }))}
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-5xl">🌟</div>
+        )}
+
+        {/* 슬라이드 번호 뱃지 */}
+        <div className="absolute top-3 right-3 text-xs font-extrabold text-white px-2.5 py-1 rounded-full shadow"
+          style={{ background: theme.accent }}>
+          {safeIndex + 1} / {totalSlides}
+        </div>
+
+        {/* 헤드라인 오버레이 */}
+        <div className="absolute bottom-0 left-0 right-0 px-4 py-3"
+          style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.6), transparent)' }}>
+          <p className="text-white font-extrabold text-sm leading-snug drop-shadow">
             {news.headline}
-          </h2>
-          <button
-            onClick={onClose}
-            className="ml-2 text-2xl font-bold text-gray-700 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-700 rounded-full w-9 h-9 flex items-center justify-center flex-shrink-0"
-            aria-label="홈으로"
-          >
-            🏠
-          </button>
-        </div>
-
-        {/* 슬라이드 이미지 */}
-        <div className="relative w-full aspect-[16/9]">
-          {!imgError[currentSlide] ? (
-            <Image
-              src={slide.imageUrl}
-              alt={slide.text}
-              fill
-              className="object-cover"
-              unoptimized
-              onError={() => setImgError((prev) => ({ ...prev, [currentSlide]: true }))}
-            />
-          ) : (
-            <div className={`w-full h-full flex items-center justify-center text-6xl ${fallbackBg[currentSlide % fallbackBg.length]}`}>
-              🌟
-            </div>
-          )}
-          {/* 슬라이드 번호 */}
-          <div className="absolute top-3 right-3 bg-black/50 text-white text-xs font-bold px-2 py-1 rounded-full">
-            {currentSlide + 1} / {totalSlides}
-          </div>
-        </div>
-
-        {/* 텍스트 + TTS */}
-        <div className="px-5 py-4 flex items-center gap-3 min-h-[80px]">
-          <button
-            onClick={() => isSpeaking ? stopSpeaking() : speak(slide.text)}
-            className={`flex-shrink-0 w-12 h-12 rounded-full text-2xl flex items-center justify-center transition-all focus:outline-none focus:ring-4 focus:ring-blue-300 ${
-              isSpeaking
-                ? 'bg-red-400 hover:bg-red-500 animate-pulse'
-                : 'bg-blue-400 hover:bg-blue-500'
-            }`}
-            aria-label={isSpeaking ? '읽기 중지' : '읽어주기'}
-          >
-            {isSpeaking ? '⏹' : '🔊'}
-          </button>
-          <p className="text-gray-800 text-lg font-semibold leading-relaxed flex-1">
-            {slide.text}
           </p>
         </div>
+      </div>
 
-        {/* 네비게이션 */}
-        <div className="px-5 pb-5 flex items-center gap-3">
+      {/* ── 텍스트 + TTS (고정 높이) ── */}
+      <div className="flex-shrink-0 flex items-center gap-3 px-3 py-2 mx-3 mt-3 rounded-2xl"
+        style={{ background: theme.bg }}>
+        <button
+          onClick={() => isSpeaking ? stopSpeaking() : speak(slide.text)}
+          className="flex-shrink-0 w-10 h-10 rounded-full text-lg flex items-center justify-center shadow transition-all hover:scale-110 active:scale-95"
+          style={{ background: isSpeaking ? '#FF6B6B' : theme.accent }}
+          aria-label={isSpeaking ? '읽기 중지' : '읽어주기'}
+        >
+          {isSpeaking ? '⏹' : '🔊'}
+        </button>
+        <p className="text-gray-800 text-sm font-bold leading-relaxed flex-1 line-clamp-2">
+          {slide.text}
+        </p>
+      </div>
+
+      {/* ── 슬라이드 점 (고정 높이) ── */}
+      <div className="flex-shrink-0 flex justify-center gap-2 py-2">
+        {news.slides.map((_, i) => (
           <button
-            onClick={goPrev}
-            disabled={currentSlide === 0}
-            className="flex-1 py-3 rounded-2xl text-base font-bold bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-all focus:outline-none focus:ring-4 focus:ring-gray-300"
+            key={i}
+            onClick={() => { stopSpeaking(); setCurrentSlide(i); }}
+            className="rounded-full transition-all duration-300"
+            style={{
+              width: i === safeIndex ? '20px' : '8px',
+              height: '8px',
+              background: i === safeIndex ? theme.accent : '#D1D5DB',
+            }}
+            aria-label={`${i + 1}번 슬라이드`}
+          />
+        ))}
+      </div>
+
+      {/* ── 이전 / 다음 버튼 (항상 하단 고정) ── */}
+      <div className="flex-shrink-0 flex gap-2 px-3 pb-3">
+        <button
+          onClick={goPrev}
+          disabled={currentSlide === 0}
+          className="flex-1 py-2.5 rounded-2xl text-sm font-extrabold transition-all hover:scale-105 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
+          style={{ background: '#F0F0F0', color: '#555' }}
+        >
+          ← 이전
+        </button>
+
+        {isLastSlide ? (
+          <button
+            onClick={handleNextNews}
+            className="flex-1 py-2.5 rounded-2xl text-sm font-extrabold text-white transition-all hover:scale-105 active:scale-95 shadow-md"
+            style={{ background: '#2ECC71' }}
           >
-            ← 이전
+            {isLastNews ? '🔄 새 이야기' : '다음 이야기 →'}
           </button>
-
-          {/* 슬라이드 점 */}
-          <div className="flex gap-1.5">
-            {news.slides.map((_, i) => (
-              <button
-                key={i}
-                onClick={() => { stopSpeaking(); setCurrentSlide(i); }}
-                className={`w-2.5 h-2.5 rounded-full transition-all focus:outline-none ${
-                  i === currentSlide ? 'bg-yellow-400 scale-125' : 'bg-gray-300'
-                }`}
-                aria-label={`${i + 1}번 슬라이드`}
-              />
-            ))}
-          </div>
-
+        ) : (
           <button
             onClick={goNext}
-            disabled={currentSlide === totalSlides - 1}
-            className="flex-1 py-3 rounded-2xl text-base font-bold bg-yellow-400 text-gray-800 hover:bg-yellow-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all focus:outline-none focus:ring-4 focus:ring-yellow-300"
+            className="flex-1 py-2.5 rounded-2xl text-sm font-extrabold text-white transition-all hover:scale-105 active:scale-95 shadow-md"
+            style={{ background: theme.accent }}
           >
             다음 →
           </button>
-        </div>
+        )}
       </div>
     </div>
   );

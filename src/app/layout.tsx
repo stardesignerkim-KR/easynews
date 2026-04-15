@@ -9,7 +9,7 @@ const notoSansKR = Noto_Sans_KR({
 });
 
 export const metadata: Metadata = {
-  title: "이지뉴스 | 쉬운 뉴스",
+  title: "포포가 궁금한 이야기",
   description: "특수교육 아동을 위한 맞춤형 쉬운 뉴스 서비스",
 };
 

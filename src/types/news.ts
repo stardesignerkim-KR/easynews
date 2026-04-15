@@ -11,5 +11,9 @@ export interface NewsItem {
   thumbnailPrompt: string;
   slides: NewsSlide[];
   originalUrl: string;
+  originalTitle: string;
+  originalDescription: string;
+  originalPubDate: string;
+  originalImageUrl: string;
   createdAt: string;
 }

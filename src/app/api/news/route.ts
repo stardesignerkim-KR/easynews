@@ -69,10 +69,10 @@ ${articleList}
       "slides": [
         {
           "text": "쉬운 말로 된 짧은 1문장 (20자 이내)",
-          "imagePrompt": "cute simple illustration for children, bright cheerful colors, [scene in English]"
+          "imageKeyword": "simple english keyword for photo search (1-3 words)"
         }
       ],
-      "thumbnailPrompt": "cute simple illustration for children, bright colors, [main theme in English]"
+      "thumbnailKeyword": "simple english keyword for photo search (1-3 words)"
     }
   ]
 }
@@ -81,7 +81,7 @@ ${articleList}
 - 헤드라인: 5단어 이내, 쉬운 말, 명사형 마무리
 - 슬라이드: 각 기사당 3~5개, 1문장씩, 20자 이내
 - 어려운 단어 사용 금지, 밝고 긍정적인 내용만
-- imagePrompt와 thumbnailPrompt는 반드시 영어로 작성`;
+- imageKeyword와 thumbnailKeyword는 반드시 영어로, Pixabay 검색에 적합한 1~3개 단어`;
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
@@ -96,9 +96,44 @@ ${articleList}
   return JSON.parse(jsonMatch[0]);
 }
 
-function buildImageUrl(prompt: string): string {
-  const fullPrompt = `${prompt}, kawaii style, soft pastel colors, children book illustration, no text`;
-  return `https://image.pollinations.ai/prompt/${encodeURIComponent(fullPrompt)}?width=800&height=500&nologo=true&seed=${Math.floor(Math.random() * 10000)}`;
+async function fetchPixabayImage(keyword: string): Promise<string> {
+  const base = `https://pixabay.com/api/?key=${process.env.PIXABAY_API_KEY}&q=${encodeURIComponent(keyword)}&per_page=5&safesearch=true&lang=en&min_width=400`;
+
+  for (const imageType of ['illustration', 'vector', 'all']) {
+    try {
+      const res = await fetch(`${base}&image_type=${imageType}`);
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data.hits && data.hits.length > 0) {
+        const pick = data.hits[Math.floor(Math.random() * Math.min(data.hits.length, 5))];
+        return pick.webformatURL;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return '';
+}
+
+// 네이버 기사 페이지에서 OG 이미지 추출
+async function fetchArticleOgImage(url: string): Promise<string> {
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return '';
+    const html = await res.text();
+
+    // og:image 태그 추출 (속성 순서 무관)
+    const match =
+      html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+
+    return match ? match[1] : '';
+  } catch {
+    return '';
+  }
 }
 
 export async function GET() {
@@ -114,23 +149,42 @@ export async function GET() {
 
     const transformed = await transformWithClaude(articles);
 
-    const newsItems = transformed.news.map((item: {
-      headline: string;
-      thumbnailPrompt: string;
-      slides: { text: string; imagePrompt: string }[];
-    }, index: number) => ({
-      id: `news-${Date.now()}-${index}`,
-      headline: item.headline,
-      thumbnail: buildImageUrl(item.thumbnailPrompt || 'colorful children news'),
-      thumbnailPrompt: item.thumbnailPrompt,
-      slides: item.slides.map((slide: { text: string; imagePrompt: string }) => ({
-        text: slide.text,
-        imagePrompt: slide.imagePrompt,
-        imageUrl: buildImageUrl(slide.imagePrompt),
-      })),
-      originalUrl: articles[index]?.article?.link || '',
-      createdAt: new Date().toISOString(),
-    }));
+    // Pixabay 이미지 + 네이버 OG 이미지 병렬로 가져오기
+    const newsItems = await Promise.all(
+      transformed.news.map(async (item: {
+        headline: string;
+        thumbnailKeyword: string;
+        slides: { text: string; imageKeyword: string }[];
+      }, index: number) => {
+        const articleUrl = articles[index]?.article?.link || '';
+
+        const [thumbnailUrl, originalImageUrl, ...slideUrls] = await Promise.all([
+          fetchPixabayImage(item.thumbnailKeyword || 'news'),
+          fetchArticleOgImage(articleUrl),
+          ...item.slides.map((slide: { text: string; imageKeyword: string }) =>
+            fetchPixabayImage(slide.imageKeyword || 'children')
+          ),
+        ]);
+
+        return {
+          id: `news-${Date.now()}-${index}`,
+          headline: item.headline,
+          thumbnail: thumbnailUrl,
+          thumbnailPrompt: item.thumbnailKeyword,
+          slides: item.slides.map((slide: { text: string; imageKeyword: string }, si: number) => ({
+            text: slide.text,
+            imagePrompt: slide.imageKeyword,
+            imageUrl: slideUrls[si] || '',
+          })),
+          originalUrl: articleUrl,
+          originalTitle: stripHtml(articles[index]?.article?.title || ''),
+          originalDescription: stripHtml(articles[index]?.article?.description || ''),
+          originalPubDate: articles[index]?.article?.pubDate || '',
+          originalImageUrl: originalImageUrl || '',
+          createdAt: new Date().toISOString(),
+        };
+      })
+    );
 
     return NextResponse.json({ news: newsItems });
   } catch (error) {
